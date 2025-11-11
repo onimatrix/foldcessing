@@ -1,0 +1,18 @@
+[general]
+# Ignore patterns (comma-separated, supports wildcards)
+ignore=*.backup.pde,temp/,build/
+
+# Default processing-java path
+processing_path=C:\processing-3.4\processing-java
+
+# Default action when running foldcessing with no arguments
+default_action=--run
+
+[profile:oni]
+processing_path=C:\Users\oni\Desktop\processing-3.4\processing-java
+
+[profile:carter]
+processing_path=C:\Users\carter\processing\processing-java
+
+[profile:danieljackson]
+processing_path=/opt/processing/processing-java

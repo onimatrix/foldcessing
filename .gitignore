@@ -1,0 +1,30 @@
+# Compiled executables
+*.exe
+*.o
+*.obj
+
+# Output directories
+output/
+
+# Debug files
+foldcessing_debug.txt
+*.log
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.sublime-workspace
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.backup.pde
+temp/
+build/
