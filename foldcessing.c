@@ -521,6 +521,25 @@ int main(int argc, char *argv[]) {
     snprintf(output_dir, sizeof(output_dir), "%s\\output", current_dir);
     CreateDirectory(output_dir, NULL);
 
+    // Check if data folder exists in project root and create junction in output folder
+    char data_dir[MAX_PATH_LEN];
+    snprintf(data_dir, sizeof(data_dir), "%s\\data", current_dir);
+    DWORD data_attribs = GetFileAttributes(data_dir);
+    if (data_attribs != INVALID_FILE_ATTRIBUTES && (data_attribs & FILE_ATTRIBUTE_DIRECTORY)) {
+        // Data folder exists, create junction in output folder
+        char output_data_link[MAX_PATH_LEN];
+        snprintf(output_data_link, sizeof(output_data_link), "%s\\data", output_dir);
+
+        // Remove old link/folder if it exists
+        RemoveDirectory(output_data_link);
+
+        // Create junction using mklink command
+        char mklink_cmd[MAX_PATH_LEN * 2];
+        snprintf(mklink_cmd, sizeof(mklink_cmd), "cmd /c mklink /J \"%s\" \"%s\" >nul 2>&1",
+                 output_data_link, data_dir);
+        system(mklink_cmd);
+    }
+
     // Create output file and build line mapping
     char output_file[MAX_PATH_LEN];
     snprintf(output_file, sizeof(output_file), "%s\\output.pde", output_dir);
@@ -761,6 +780,11 @@ int main(int argc, char *argv[]) {
     CloseHandle(hStderrRead);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+
+    // Cleanup: Delete the entire output folder
+    char rmdir_cmd[MAX_PATH_LEN + 50];
+    snprintf(rmdir_cmd, sizeof(rmdir_cmd), "rmdir /s /q \"%s\" >nul 2>&1", output_dir);
+    system(rmdir_cmd);
 
     return exit_code;
 }
