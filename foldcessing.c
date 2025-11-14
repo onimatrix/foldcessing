@@ -22,6 +22,7 @@
 #include <string.h>
 #include <windows.h>
 #include <ctype.h>
+#include <io.h>
 
 // Declare missing Windows functions for TCC
 #ifndef ATTACH_PARENT_PROCESS
@@ -67,6 +68,7 @@ typedef struct {
     char ignore_patterns[MAX_IGNORE_PATTERNS][MAX_PATH_LEN];
     int ignore_count;
     char default_action[256];
+    int auto_close;
 } Config;
 
 FileEntry files[MAX_FILES];
@@ -191,6 +193,13 @@ void parse_config(const char *profile) {
             // Profile values override general
             if (strcasecmp_win(current_section, target_section) == 0 || !config.default_action[0]) {
                 strncpy(config.default_action, value, sizeof(config.default_action) - 1);
+            }
+        } else if (strcasecmp_win(key, "auto_close") == 0) {
+            // Parse boolean value
+            if (strcasecmp_win(value, "true") == 0 || strcmp(value, "1") == 0) {
+                config.auto_close = 1;
+            } else if (strcasecmp_win(value, "false") == 0 || strcmp(value, "0") == 0) {
+                config.auto_close = 0;
             }
         }
     }
@@ -449,7 +458,7 @@ int main(int argc, char *argv[]) {
     HMODULE kernel32 = GetModuleHandle("kernel32.dll");
     AttachConsoleFunc pAttachConsole = (AttachConsoleFunc)GetProcAddress(kernel32, "AttachConsole");
 
-    int has_console = 1;  // Assume double-clicked (we have our own console)
+    int has_console = 0;  // Default: assume command line or redirected
     if (pAttachConsole) {
         // Try to attach to parent - if this succeeds, we're from command line
         BOOL attached = pAttachConsole(ATTACH_PARENT_PROCESS);
@@ -457,8 +466,36 @@ int main(int argc, char *argv[]) {
             // Successfully attached to parent console - we're from command line
             has_console = 0;
             // Note: We stay attached to parent, output will go there
+        } else {
+            // Failed to attach - could be double-clicked OR run by build system (Sublime, etc)
+            // Check if stdout is redirected (pipe/file) or if we need a console
+            HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+            DWORD fileType = GetFileType(hOut);
+
+            if (fileType == FILE_TYPE_UNKNOWN || fileType == FILE_TYPE_CHAR) {
+                // Not redirected - we're truly double-clicked, need our own console
+                has_console = 1;
+
+                // AllocConsole creates a console but doesn't redirect stdio automatically
+                // We need to manually reconnect the C runtime streams
+                AllocConsole();
+
+                // Get handles to console
+                hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+                HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+                HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+
+                // Reopen the C runtime file descriptors to point to console
+                FILE *fp_out = _fdopen(_open_osfhandle((long)hOut, 0), "w");
+                FILE *fp_err = _fdopen(_open_osfhandle((long)hErr, 0), "w");
+                FILE *fp_in = _fdopen(_open_osfhandle((long)hIn, 0), "r");
+
+                if (fp_out) { *stdout = *fp_out; setvbuf(stdout, NULL, _IONBF, 0); }
+                if (fp_err) { *stderr = *fp_err; setvbuf(stderr, NULL, _IONBF, 0); }
+                if (fp_in) *stdin = *fp_in;
+            }
+            // else: stdout is redirected (pipe/file) by build system - use existing handles
         }
-        // If attach failed, we're double-clicked (already have our own console)
     }
 
     // Pre-validate: if we'll need processing-java, check it exists BEFORE folding
@@ -477,7 +514,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: processing-java path not specified\n");
             fprintf(stderr, "Either provide it on command line or add 'processing_path' to .foldcessing config\n");
             fprintf(stderr, "Example: foldcessing.exe \"C:\\path\\to\\processing-java\" --run\n");
-            if (!has_console) {
+            if (has_console) {
                 MessageBox(NULL,
                     "processing-java path not specified.\n\n"
                     "Add 'processing_path' to your .foldcessing config file.",
@@ -503,7 +540,7 @@ int main(int argc, char *argv[]) {
         if (attribs == INVALID_FILE_ATTRIBUTES) {
             fprintf(stderr, "Error: processing-java not found at: %s\n", processing_path);
             fprintf(stderr, "Please check the path in your .foldcessing config or command line argument\n");
-            if (!has_console) {
+            if (has_console) {
                 char msg[MAX_PATH_LEN + 256];
                 snprintf(msg, sizeof(msg),
                     "processing-java not found at:\n%s\n\n"
@@ -516,7 +553,7 @@ int main(int argc, char *argv[]) {
         if (attribs & FILE_ATTRIBUTE_DIRECTORY) {
             fprintf(stderr, "Error: %s is a directory, not the processing-java executable\n", processing_path);
             fprintf(stderr, "The path should point to the processing-java executable file\n");
-            if (!has_console) {
+            if (has_console) {
                 char msg[MAX_PATH_LEN + 256];
                 snprintf(msg, sizeof(msg),
                     "%s\n\nis a directory, not the processing-java executable.\n\n"
@@ -607,8 +644,8 @@ int main(int argc, char *argv[]) {
 
     // Determine if we should run processing-java (already validated above)
     if (!will_need_processing) {
-        // If double-clicked, pause before closing
-        if (has_console) {
+        // If double-clicked and auto_close not enabled, pause before closing
+        if (has_console && !config.auto_close) {
             printf("\nPress Enter to continue...");
             fflush(stdout);
             getchar();
@@ -842,8 +879,8 @@ int main(int argc, char *argv[]) {
     snprintf(rmdir_cmd, sizeof(rmdir_cmd), "rmdir /s /q \"%s\" >\\\\.\\NUL 2>&1", output_dir);
     system(rmdir_cmd);
 
-    // If double-clicked, pause before closing
-    if (has_console) {
+    // If double-clicked and auto_close not enabled, pause before closing
+    if (has_console && !config.auto_close) {
         printf("\nPress Enter to continue...");
         fflush(stdout);
         getchar();

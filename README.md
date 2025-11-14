@@ -70,6 +70,9 @@ processing_path=C:\processing-3.4\processing-java
 # Default action when running foldcessing with no arguments
 default_action=--run
 
+# If running from double click, making this false makes the console wait for the user to press ENTER before closing
+auto_close=true
+
 [profile:john]
 processing_path=C:\Users\john\processing\processing-java
 

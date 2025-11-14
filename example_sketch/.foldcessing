@@ -8,6 +8,8 @@ processing_path=C:\processing-3.4\processing-java
 # Default action when running foldcessing with no arguments
 default_action=--run
 
+#auto_close=true
+
 [profile:oni]
 processing_path=C:\Users\oni\Desktop\processing-3.4\processing-java
 
