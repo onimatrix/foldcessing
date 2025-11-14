@@ -554,7 +554,7 @@ int main(int argc, char *argv[]) {
 
         // Create junction using mklink command
         char mklink_cmd[MAX_PATH_LEN * 2];
-        snprintf(mklink_cmd, sizeof(mklink_cmd), "cmd /c mklink /J \"%s\" \"%s\" >nul 2>&1",
+        snprintf(mklink_cmd, sizeof(mklink_cmd), "cmd /c mklink /J \"%s\" \"%s\" >\\\\.\\NUL 2>&1",
                  output_data_link, data_dir);
         system(mklink_cmd);
     }
@@ -839,7 +839,7 @@ int main(int argc, char *argv[]) {
 
     // Cleanup: Delete the entire output folder
     char rmdir_cmd[MAX_PATH_LEN + 50];
-    snprintf(rmdir_cmd, sizeof(rmdir_cmd), "rmdir /s /q \"%s\" >nul 2>&1", output_dir);
+    snprintf(rmdir_cmd, sizeof(rmdir_cmd), "rmdir /s /q \"%s\" >\\\\.\\NUL 2>&1", output_dir);
     system(rmdir_cmd);
 
     // If double-clicked, pause before closing
