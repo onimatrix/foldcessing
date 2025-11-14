@@ -29,7 +29,6 @@
 #endif
 
 typedef BOOL (WINAPI *AttachConsoleFunc)(DWORD dwProcessId);
-typedef BOOL (WINAPI *FreeConsoleFunc)(VOID);
 
 #define MAX_PATH_LEN 4096
 #define MAX_FILES 10000
@@ -428,18 +427,22 @@ int main(int argc, char *argv[]) {
     // Load config file
     parse_config(profile);
 
-    // Detect if running without console (double-clicked)
-    // Try to attach to parent's console. If we can, we were launched from a console.
+    // Detect if running from command line vs double-clicked
+    // Try to attach to parent's console. If we can, we were launched from a terminal.
     // Load functions dynamically for TCC compatibility
     HMODULE kernel32 = GetModuleHandle("kernel32.dll");
-    FreeConsoleFunc pFreeConsole = (FreeConsoleFunc)GetProcAddress(kernel32, "FreeConsole");
     AttachConsoleFunc pAttachConsole = (AttachConsoleFunc)GetProcAddress(kernel32, "AttachConsole");
 
-    int has_console = 0;  // Assume no console (double-clicked)
-    if (pFreeConsole && pAttachConsole) {
-        pFreeConsole();  // Detach from current console if any
+    int has_console = 1;  // Assume double-clicked (we have our own console)
+    if (pAttachConsole) {
+        // Try to attach to parent - if this succeeds, we're from command line
         BOOL attached = pAttachConsole(ATTACH_PARENT_PROCESS);
-        has_console = attached;  // True if we successfully attached to parent console
+        if (attached) {
+            // Successfully attached to parent console - we're from command line
+            has_console = 0;
+            // Note: We stay attached to parent, output will go there
+        }
+        // If attach failed, we're double-clicked (already have our own console)
     }
 
     // Pre-validate: if we'll need processing-java, check it exists BEFORE folding
@@ -588,6 +591,12 @@ int main(int argc, char *argv[]) {
 
     // Determine if we should run processing-java (already validated above)
     if (!will_need_processing) {
+        // If double-clicked, pause before closing
+        if (has_console) {
+            printf("\nPress Enter to continue...");
+            fflush(stdout);
+            getchar();
+        }
         return 0;
     }
 
@@ -785,6 +794,13 @@ int main(int argc, char *argv[]) {
     char rmdir_cmd[MAX_PATH_LEN + 50];
     snprintf(rmdir_cmd, sizeof(rmdir_cmd), "rmdir /s /q \"%s\" >nul 2>&1", output_dir);
     system(rmdir_cmd);
+
+    // If double-clicked, pause before closing
+    if (has_console) {
+        printf("\nPress Enter to continue...");
+        fflush(stdout);
+        getchar();
+    }
 
     return exit_code;
 }
