@@ -30,6 +30,22 @@
 
 typedef BOOL (WINAPI *AttachConsoleFunc)(DWORD dwProcessId);
 
+// Job Object types and function pointers for TCC compatibility
+typedef HANDLE (WINAPI *CreateJobObjectFunc)(LPSECURITY_ATTRIBUTES, LPCSTR);
+typedef BOOL (WINAPI *SetInformationJobObjectFunc)(HANDLE, int, LPVOID, DWORD);
+typedef BOOL (WINAPI *AssignProcessToJobObjectFunc)(HANDLE, HANDLE);
+
+#ifndef JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+#define JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 0x00002000
+#endif
+
+#ifndef JobObjectExtendedLimitInformation
+#define JobObjectExtendedLimitInformation 9
+#endif
+
+// Use a byte buffer to avoid struct definition conflicts
+#define JOBOBJECT_EXTENDED_LIMIT_INFO_SIZE 144
+
 #define MAX_PATH_LEN 4096
 #define MAX_FILES 10000
 #define MAX_LINE 8192
@@ -654,11 +670,37 @@ int main(int argc, char *argv[]) {
 
     PROCESS_INFORMATION pi = {0};
 
-    if (!CreateProcess(NULL, command, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+    // Create a Job Object to ensure all child processes are killed if foldcessing exits
+    // Load functions dynamically for TCC compatibility
+    HMODULE hKernel32 = GetModuleHandle("kernel32.dll");
+    CreateJobObjectFunc pCreateJobObject = (CreateJobObjectFunc)GetProcAddress(hKernel32, "CreateJobObjectA");
+    SetInformationJobObjectFunc pSetInformationJobObject = (SetInformationJobObjectFunc)GetProcAddress(hKernel32, "SetInformationJobObject");
+    AssignProcessToJobObjectFunc pAssignProcessToJobObject = (AssignProcessToJobObjectFunc)GetProcAddress(hKernel32, "AssignProcessToJobObject");
+
+    HANDLE hJob = NULL;
+    if (pCreateJobObject && pSetInformationJobObject && pAssignProcessToJobObject) {
+        hJob = pCreateJobObject(NULL, NULL);
+        if (hJob) {
+            // Use a byte buffer to avoid struct definition issues
+            char jeli[JOBOBJECT_EXTENDED_LIMIT_INFO_SIZE] = {0};
+            // LimitFlags is at offset 16 (after two LARGE_INTEGER fields)
+            *(DWORD*)(jeli + 16) = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            pSetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+        }
+    }
+
+    if (!CreateProcess(NULL, command, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
         fprintf(stderr, "Failed to launch processing-java: %s\n", processing_path);
         fprintf(stderr, "The file exists but cannot be executed.\n");
+        if (hJob) CloseHandle(hJob);
         return 1;
     }
+
+    // Assign the process to the job, then resume it
+    if (hJob && pAssignProcessToJobObject) {
+        pAssignProcessToJobObject(hJob, pi.hProcess);
+    }
+    ResumeThread(pi.hThread);
 
     CloseHandle(hStdoutWrite);
     CloseHandle(hStderrWrite);
@@ -789,6 +831,11 @@ int main(int argc, char *argv[]) {
     CloseHandle(hStderrRead);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+
+    // Close the job object - this will kill all child processes if any are still running
+    if (hJob) {
+        CloseHandle(hJob);
+    }
 
     // Cleanup: Delete the entire output folder
     char rmdir_cmd[MAX_PATH_LEN + 50];
